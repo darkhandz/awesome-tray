@@ -919,28 +919,17 @@ NAME is a string, typically a directory name."
 
 (defun awesome-tray-update-belong-cache ()
   (setq awesome-tray-belong-cache
-        (let* ((class-nodes (append (awesome-tray-get-match-nodes "(class_definition name: (symbol) @x)")
-                                    (awesome-tray-get-match-nodes "(class_definition name: (identifier) @x)")))
-               (function-nodes (append (awesome-tray-get-match-nodes "(function_definition name: (symbol) @x)")
-                                       (awesome-tray-get-match-nodes "(function_definition name: (identifier) @x)")))
+        (let* ((function-nodes (awesome-tray-get-match-nodes "(function_declarator declarator: [(identifier) @x])"))
                which-belong-info
-               which-class-info
                which-func-info)
-          (setq which-class-info (catch 'found
-                                   (dolist (class-node class-nodes)
-                                     (when (and (> (point) (tsc-node-start-position (tsc-get-parent class-node)))
-                                                (< (point) (tsc-node-end-position (tsc-get-parent class-node))))
-                                       (throw 'found (tsc-node-text class-node)))
-                                     )
-                                   (throw 'found "")))
           (setq which-func-info (catch 'found
                                   (dolist (function-node function-nodes)
-                                    (when (and (> (point) (tsc-node-start-position (tsc-get-parent function-node)))
-                                               (< (point) (tsc-node-end-position (tsc-get-parent function-node))))
+                                    (when (and (> (point) (tsc-node-start-position (tsc-get-parent (tsc-get-parent function-node))))
+                                               (< (point) (tsc-node-end-position (tsc-get-parent (tsc-get-parent function-node)))))
                                       (throw 'found (tsc-node-text function-node)))
                                     )
                                   (throw 'found "")))
-          (setq which-belong-info (string-trim (concat which-class-info " " which-func-info)))
+          (setq which-belong-info (string-trim (concat " " which-func-info)))
           (if (string-equal which-belong-info "")
               ""
             (format "[%s]" which-belong-info))))

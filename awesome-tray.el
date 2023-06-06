@@ -80,6 +80,10 @@
 ;;
 
 ;;; Change log:
+;; 2023/06/03
+;;      * Add `awesome-tray-module-celestial-info' to show moon phase date and sunrise/sunset time.
+;;      * Add `awesome-tray-location-info-all', `awesome-tray-location-info-top',
+;;        and `awesome-tray-location-info-bottom' to use custom string for All, Top and Bottom in buffer location info.
 ;;
 ;; 2022/03/01
 ;;      * Use overlay re-implement tray information render.
@@ -316,6 +320,21 @@ If nil, don't update the awesome-tray automatically."
   :group 'awesome-tray
   :type 'string)
 
+(defcustom awesome-tray-location-info-all ""
+  "Default string indicating buffer all."
+  :group 'awesome-tray
+  :type 'string)
+
+(defcustom awesome-tray-location-info-top " ⬆"
+  "Default string indicating buffer top."
+  :group 'awesome-tray
+  :type 'string)
+
+(defcustom awesome-tray-location-info-bottom " ⬇"
+  "Default string indicating buffer bottom."
+  :group 'awesome-tray
+  :type 'string)
+
 (defcustom awesome-tray-ellipsis "…"
   "Default string for the ellipsis when something is truncated."
   :group 'awesome-tray
@@ -443,14 +462,6 @@ their full name."
   :type 'integer
   :group 'awesome-tray)
 
-(defcustom awesome-tray-file-path-truncate-dirname-levels 0
-  "In file-path module, how many levels of parent directories should be shown in
-their first character.
-
-These goes before those shown in their full names."
-  :type 'integer
-  :group 'awesome-tray)
-
 (defcustom awesome-tray-info-padding-right 0
   "You can customize right padding to avoid awesome-tray wrap sometimes."
   :type 'integer
@@ -498,6 +509,8 @@ Example:
   '(("awesome-tab" . (awesome-tray-module-awesome-tab-info awesome-tray-module-awesome-tab-face))
     ("buffer-name" . (awesome-tray-module-buffer-name-info awesome-tray-module-buffer-name-face))
     ("circe" . (awesome-tray-module-circe-info awesome-tray-module-circe-face))
+    ("date" . (awesome-tray-module-date-info awesome-tray-module-date-face))
+    ("celestial" . (awesome-tray-module-celestial-info awesome-tray-module-celestial-face))
     ("date" . (awesome-tray-module-date-info awesome-tray-module-date-face))
     ("evil" . (awesome-tray-module-evil-info awesome-tray-module-evil-face))
     ("file-path" . (awesome-tray-module-file-path-info awesome-tray-module-file-path-face))
@@ -727,7 +740,9 @@ Requires `anzu', also `evil-anzu' if using `evil-mode' for compatibility with
                  (setq battery-status (battery-format " [%p%%]" battery-info)))
                 ((member battery-type '("off-line" "BAT" "Battery"))
                  (setq battery-type "OFF")
-                 (setq battery-status (battery-format " [%p%% %t]" battery-info))))
+                 (if (eq system-type 'darwin)
+                     (setq battery-status (battery-format " [%p%%]" battery-info))
+                   (setq battery-status (battery-format " [%p%% %t]" battery-info)))))
 
           ;; Update battery cache.
           (setq awesome-tray-battery-status-cache (concat battery-type battery-status)))
@@ -739,7 +754,13 @@ Requires `anzu', also `evil-anzu' if using `evil-mode' for compatibility with
 (defun awesome-tray-module-location-info ()
   (if (equal major-mode 'eaf-mode)
       ""
-    (concat (format-mode-line awesome-tray-location-format))))
+    (string-replace
+     " All" awesome-tray-location-info-all
+     (string-replace
+      " Top" awesome-tray-location-info-top
+      (string-replace
+       " Bottom" awesome-tray-location-info-bottom
+       (format-mode-line awesome-tray-location-format))))))
 
 (with-eval-after-load 'libmpdel
   (add-hook 'libmpdel-current-playlist-changed-hook 'awesome-tray-mpd-command-update-cache)
@@ -775,8 +796,18 @@ Requires `anzu', also `evil-anzu' if using `evil-mode' for compatibility with
   "Displays the date."
   (format-time-string awesome-tray-date-format))
 
+(defun awesome-tray-module-celestial-info ()
+  "Displays lunar phase and sunrise/sunset time."
+  (with-demoted-errors
+      ""
+    (if (featurep 'celestial-mode-line)
+        celestial-mode-line-string
+      "")))
+
 (defun awesome-tray-module-last-command-info ()
-  (format "%s" last-command))
+  ;; Only show last command when user enable `toggle-debug-on-error'.
+  (when debug-on-error
+    (format "%s" last-command)))
 
 (defun awesome-tray-module-buffer-name-info ()
   (let (bufname)
@@ -801,53 +832,34 @@ Requires `anzu', also `evil-anzu' if using `evil-mode' for compatibility with
 (defun awesome-tray-module-parent-dir-info ()
   (format "%s" (file-name-nondirectory (directory-file-name default-directory))))
 
-(defun awesome-tray-shrink-dir-name (name)
-  "Shrink NAME to be its first letter, or the first two if starts \".\"
-
-NAME is a string, typically a directory name."
-  (let ((dot-num (if (string-match "^\\.+" name)
-                     (length (match-string 0 name))
-                   0)))
-    (substring name 0 (min (length name) (+ dot-num awesome-tray-file-path-truncated-name-length)))))
+(defun awesome-tray-shrink-dir-name (input-string)
+  (let* ((words (split-string input-string "-"))
+         (abbreviated-words (mapcar (lambda (word) (substring word 0 1)) words)))
+    (mapconcat 'identity abbreviated-words "-")))
 
 (defun awesome-tray-module-file-path-info ()
-  (if (not buffer-file-name)
-      (let ((bufname (buffer-name)))
-        (setq bufname (if awesome-tray-buffer-name-buffer-changed
-                          (if (and (buffer-modified-p)
-                                   (not (eq buffer-file-name nil)))
-                              (concat (buffer-name) awesome-tray-buffer-name-buffer-changed-style)
-                            (buffer-name))
-                        (format "%s" (buffer-name))))
-        (awesome-tray-truncate-string bufname awesome-tray-file-name-max-length t))
-    (let* ((file-path (split-string (buffer-file-name) "/" t))
-           (shown-path)
-           (path-len (length file-path))
-           (modp (if (buffer-modified-p) "*" ""))
-           (full-num awesome-tray-file-path-full-dirname-levels)
-           (trunc-num awesome-tray-file-path-truncate-dirname-levels)
-           (show-name awesome-tray-file-path-show-filename))
-      (when (> path-len (+ 1 full-num))
-        (push (string-join
-               (mapcar #'awesome-tray-shrink-dir-name
-                       (cl-subseq file-path
-                                  (max 0 (- path-len (+ 1 full-num trunc-num)))
-                                  (- path-len (1+ full-num)))) "/")
-              shown-path))
-      (when (> path-len 1)
-        (push (string-join
-               (cl-subseq file-path
-                          (max 0 (- path-len (1+ full-num)))
-                          (1- path-len)) "/")
-              shown-path))
-      (when show-name
-        (push (car (last file-path)) shown-path))
-      (concat modp
-              (if (<= path-len (+ 1 full-num trunc-num))
-                  "/"
-                "./")
-              (string-join (nreverse (cl-remove "" shown-path)) "/")
-              (when (and shown-path (not show-name)) "/")))))
+  (let* ((file-path (split-string (if buffer-file-name buffer-file-name default-directory) "/" t))
+         (full-num awesome-tray-file-path-full-dirname-levels)
+         (show-name awesome-tray-file-path-show-filename)
+         shown-path)
+    ;; Remove file name if `awesome-tray-file-path-show-filename' is nil.
+    (setq show-path
+          (if buffer-file-name
+              (if show-name file-path (butlast file-path))
+            file-path))
+    ;; Remove redundant directory with `awesome-tray-file-path-full-dirname-levels' value.
+    (setq show-path (nthcdr (- (length show-path)
+                               (if buffer-file-name
+                                   (if show-name (1+ full-num) full-num)
+                                 (1+ full-num)))
+                            show-path))
+    ;; Shrink parent directory name to save minibuffer space.
+    (setq show-path
+          (append (mapcar #'awesome-tray-shrink-dir-name (butlast show-path))
+                  (last show-path)))
+    ;; Join paths.
+    (setq show-path (mapconcat #'identity show-path "/"))
+    show-path))
 
 (defun awesome-tray-module-awesome-tab-info ()
   (with-demoted-errors
@@ -1119,18 +1131,19 @@ If right is non nil, replace to the right"
   (interactive)
   (when awesome-tray-hide-mode-line
     ;; Restore mode-line colors.
-    (set-face-attribute 'mode-line nil
-                        :foreground (nth 0 awesome-tray-mode-line-colors)
-                        :background (nth 1 awesome-tray-mode-line-colors)
-                        :family (nth 2 awesome-tray-mode-line-colors)
-                        :box (nth 3 awesome-tray-mode-line-colors)
-                        :height awesome-tray-mode-line-default-height)
-    (set-face-attribute 'mode-line-inactive nil
-                        :foreground (nth 4 awesome-tray-mode-line-colors)
-                        :background (nth 5 awesome-tray-mode-line-colors)
-                        :family (nth 6 awesome-tray-mode-line-colors)
-                        :box (nth 7 awesome-tray-mode-line-colors)
-                        :height awesome-tray-mode-line-default-height))
+    (when awesome-tray-mode-line-colors
+      (set-face-attribute 'mode-line nil
+                          :foreground (nth 0 awesome-tray-mode-line-colors)
+                          :background (nth 1 awesome-tray-mode-line-colors)
+                          :family (nth 2 awesome-tray-mode-line-colors)
+                          :box (nth 3 awesome-tray-mode-line-colors)
+                          :height awesome-tray-mode-line-default-height)
+      (set-face-attribute 'mode-line-inactive nil
+                          :foreground (nth 4 awesome-tray-mode-line-colors)
+                          :background (nth 5 awesome-tray-mode-line-colors)
+                          :family (nth 6 awesome-tray-mode-line-colors)
+                          :box (nth 7 awesome-tray-mode-line-colors)
+                          :height awesome-tray-mode-line-default-height)))
 
   ;; Remove awesome-tray overlays
   (mapc 'delete-overlay awesome-tray-overlays)
